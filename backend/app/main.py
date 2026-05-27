@@ -1,5 +1,5 @@
 """FastAPI application entry point."""
-
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -25,6 +25,9 @@ app = FastAPI(
     version=settings.APP_VERSION,
     lifespan=lifespan,
 )
+
+os.makedirs("uploads/published_pages", exist_ok=True)
+app.mount("/published-pages", StaticFiles(directory="uploads/published_pages"), name="published_pages")
 
 app.add_middleware(
     CORSMiddleware,

@@ -1,3 +1,21 @@
+# 忽略虚拟环境
+venv/
+backend/venv/
+
+# 忽略本地大模型文件
 backend/models/
-backend/data/*.db
-backend/data/*.sqlite
+*.bin
+*.safetensors
+*.onnx
+*.onnx_data
+
+# 忽略本地数据库和上传的测试文件
+backend/data/
+backend/uploads/
+*.db
+*.sqlite3
+
+# 忽略缓存
+__pycache__/
+.DS_Store
+.idea/

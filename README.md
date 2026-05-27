@@ -54,6 +54,11 @@ RAG-Pro/
 
 ## 系统部署
 
+由于models权重文件体积较大（全量约 4GB+），为防止运行时自动下载因网络拥堵、限速导致失败，系统已全面切换为本地离线路径解析。请在启动后端前手动下载模型：
+
+- 模型下载链接：[百度网盘 - models.zip](https://pan.baidu.com/s/1jMJe-in8k_58Tn1G58akkQ?pwd=k9us) （提取码: `k9us`）
+- 目录放置要求：下载并解压后，请将整包 `models` 文件夹直接放入 `backend/` 目录中。
+
 #### 1. 启动后端
 
 ```powershell

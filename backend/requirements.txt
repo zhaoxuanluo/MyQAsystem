@@ -11,13 +11,15 @@ aiosqlite==0.20.0
 greenlet==3.1.1
 
 # Vector Database (Milvus Lite - no server needed)
-pymilvus[model]==2.5.4
-milvus-lite
+pymilvus==3.0.0
+milvus-model==0.2.12
+milvus-lite==3.0
 
 # Embedding & Reranker
 FlagEmbedding==1.2.11
 sentence-transformers==3.3.1
 torch>=2.0.0
+peft==0.19.1
 
 # LLM Integration
 litellm==1.55.8
@@ -34,3 +36,4 @@ aiofiles==24.1.0
 python-dotenv==1.0.1
 httpx>=0.23.0,<0.28.0
 sse-starlette==2.2.1
+modelscope==1.37.1

@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     ALLOWED_EXTENSIONS: list[str] = ["pdf", "csv", "txt", "md", "docx", "doc"]
 
     # Embedding Model
-    DEFAULT_EMBEDDING_MODEL: str = "BAAI/bge-m3"
+    DEFAULT_EMBEDDING_MODEL: str = str(PROJECT_ROOT / "models" / "BAAI" / "bge-m3")
     EMBEDDING_DEVICE: str = "cpu"  # cpu / cuda
     EMBEDDING_BATCH_SIZE: int = 32
     
@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     LOCAL_MODEL_DIR: str = str(Path(__file__).parent.parent / "models")
 
     # Reranker Model
-    DEFAULT_RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
+    DEFAULT_RERANKER_MODEL: str = str(PROJECT_ROOT / "models" / "BAAI" / "bge-reranker-v2-m3")
 
     # Retrieval
     RETRIEVAL_TOP_K: int = 20  # Hybrid search candidates
