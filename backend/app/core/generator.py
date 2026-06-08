@@ -10,6 +10,9 @@ from app.core.llm_manager import chat_completion, get_llm_config
 from app.core.agent_router import route_and_generate
 from app.utils.prompt_templates import build_rag_messages
 from app.models.llm_config import LLMConfig
+# ⚠️ 同样需要引入你的向量化函数
+from app.core.embedder import get_embedder
+from app.core.vector_store import vector_store
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +25,24 @@ async def generate_answer(
     conversation_history: list[dict] | None = None,
     stream: bool = True,
     enable_agent: bool = True,
+    user_id: str = "default_user", # 默认加上 user_id
 ) -> dict | AsyncGenerator[dict, None]:
+
+    # ================= 新增：检索长期记忆 =================
+    long_term_memories = []
+    try:
+        # 调用 embedder 把用户的问题变成向量
+        embedder = get_embedder()
+        vector_dict = embedder.embed_query(query)
+        query_vector = vector_dict["dense"]
+
+        # 2. 去 Milvus 里搜最相关的 2 条记忆
+        memory_results = vector_store.search_memory(user_id=kb_id, query_vector=query_vector, top_k=2)
+        long_term_memories = [m.content for m in memory_results]
+    except Exception as e:
+        logger.warning(f"长期记忆检索跳过或失败: {e}")
+    # =========================================================
+
     """Full RAG pipeline with intelligent agent routing.
 
     Args:
@@ -85,6 +105,7 @@ async def generate_answer(
     messages = build_rag_messages(
         query=query,
         context_chunks=context_chunks,
+        long_term_memories=long_term_memories,  # 新增长期记忆挂入
         confidence=retrieval.confidence,
         confidence_label=retrieval.confidence_label,
         conversation_history=conversation_history,

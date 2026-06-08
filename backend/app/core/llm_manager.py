@@ -47,7 +47,9 @@ def _build_litellm_model(config: LLMConfig) -> str:
 
     # If the saved model name already includes a provider prefix, keep it as-is.
     # This avoids generating invalid values like "openai/openai/gpt-4o".
-    if "/" in model_name:
+    known_routing_prefixes = ["openai/", "anthropic/", "ollama/", "huggingface/", "bedrock/"]
+
+    if any(model_name.startswith(p) for p in known_routing_prefixes):
         return model_name
 
     prefix = PROVIDER_PREFIX.get(config.provider, "openai/")

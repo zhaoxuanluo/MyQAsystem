@@ -28,6 +28,13 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 class Base(DeclarativeBase):
     pass
 
+from app.models.knowledge_base import KnowledgeBase
+from app.models.conversation import Conversation, Message
+from app.models.llm_config import LLMConfig
+# 长期记忆模型
+from app.models.memory import LongTermMemory  # Ensure memory model is imported for migrations
+
+
 
 async def init_db():
     """Create all tables on startup (for development)."""

@@ -33,6 +33,21 @@ INTENT_DETECTION_PROMPT = """分析用户的问题，判断最佳回答形式。
 
 
 def build_rag_messages(
+        query: str,
+        context_chunks: list[dict],
+        long_term_memories: list[str] = None,  # <--- 新增接收参数
+        # ... 其他参数保持不变 ...
+):
+    system_prompt = "你是一个基于 RAG 架构的智能助手。...\n"
+
+    # 注入长期记忆
+    if long_term_memories:
+        system_prompt += "\n【关于用户的关键记忆】（请在回答时参考以下事实）：\n"
+        for i, mem in enumerate(long_term_memories, 1):
+            system_prompt += f"{i}. {mem}\n"
+
+
+def build_rag_messages(
     query: str,
     context_chunks: list[dict],
     confidence: float,

@@ -1,7 +1,9 @@
 <template>
   <div class="chat-shell">
     <div class="chat-container">
-      <div class="chat-sidebar">
+      <div class="mobile-overlay" :class="{ 'is-active': showSidebar }" @click="showSidebar = false"></div>
+
+      <div class="chat-sidebar" :class="{ 'show-mobile': showSidebar }">
         <div class="sidebar-top">
           <div class="sidebar-title">智能问答</div>
           <div class="sidebar-subtitle">彩色知识对话台</div>
@@ -22,7 +24,7 @@
             class="history-item"
             :class="{ active: chatStore.conversationId === conv.id }"
           >
-            <div class="history-content" @click="loadConversation(conv.id)">
+            <div class="history-content" @click="loadConversation(conv.id); showSidebar = false">
               {{ conv.title }}
             </div>
             <div class="history-actions">
@@ -40,7 +42,10 @@
 
       <div class="chat-main">
         <div class="main-hero">
-          <div>
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <el-button class="mobile-menu-btn" text @click="showSidebar = true">
+              <el-icon :size="22"><Expand /></el-icon>
+            </el-button>
             <h2>{{ currentConversationTitle }}</h2>
           </div>
           <div class="hero-dots">
@@ -108,17 +113,36 @@
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
+
+            <el-button size="small" type="warning" plain class="agent-btn" @click="openMemoryDrawer" :disabled="!selectedKb">
+              <el-icon><Cpu /></el-icon> 记忆
+            </el-button>
           </div>
         </div>
       </div>
     </div>
+    <el-drawer v-model="memoryDrawerVisible" title="记忆管理" size="420px">
+      <div v-loading="loadingMemories" class="memory-drawer-content">
+        <el-empty v-if="!loadingMemories && memories.length === 0" description="该知识库暂无记忆" />
+
+        <div v-else class="memory-list">
+          <div v-for="mem in memories" :key="mem.id" class="memory-item">
+            <div class="memory-content">{{ mem.content }}</div>
+            <div class="memory-footer">
+              <span class="memory-time">{{ new Date(mem.created_at).toLocaleString() }}</span>
+              <el-button size="small" type="danger" text @click="deleteMemory(mem.id)">遗忘</el-button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Delete, Edit, MagicStick, Plus, Promotion } from '@element-plus/icons-vue'
+import { Delete, Edit, MagicStick, Plus, Promotion, Cpu, Expand } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { agentApi, chatApi, llmApi, shortcutApi } from '@/api'
 import ChatMessage from '@/components/ChatMessage.vue'
@@ -128,6 +152,7 @@ import { useKnowledgeStore } from '@/stores/knowledge'
 const route = useRoute()
 const kbStore = useKnowledgeStore()
 const chatStore = useChatStore()
+const showSidebar = ref(false) // 控制移动端侧边栏是否显示
 
 const selectedKb = ref(route.query.kb_id || localStorage.getItem('lastKbId') || '')
 const selectedLlm = ref(null)
@@ -206,6 +231,7 @@ function onLlmChange(llmId) {
 
 function newConversation() {
   chatStore.reset()
+  showSidebar.value = false // 新建对话后自动收起侧边栏
 }
 
 async function loadHistory() {
@@ -420,6 +446,55 @@ async function handleSaveShortcut(msg, msgIndex) {
     ElMessage.error('保存失败')
   }
 }
+
+// ====== 记忆管理 ======
+const memoryDrawerVisible = ref(false)
+const memories = ref([])
+const loadingMemories = ref(false)
+
+async function openMemoryDrawer() {
+  if (!selectedKb.value) {
+    ElMessage.warning('请先选择一个知识库')
+    return
+  }
+  memoryDrawerVisible.value = true
+  await fetchMemories()
+}
+
+async function fetchMemories() {
+  loadingMemories.value = true
+  try {
+    const res = await fetch(`/api/v1/memory?kb_id=${selectedKb.value}`)
+    if (!res.ok) throw new Error('获取失败')
+    const data = await res.json()
+    memories.value = data.items || []
+  } catch (e) {
+    ElMessage.error('获取记忆失败')
+  } finally {
+    loadingMemories.value = false
+  }
+}
+
+async function deleteMemory(memoryId) {
+  try {
+    await ElMessageBox.confirm('确定要让大模型永久遗忘这条记忆吗？', '遗忘确认', {
+      confirmButtonText: '强制遗忘',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+
+    const res = await fetch(`/api/v1/memory/${memoryId}?kb_id=${selectedKb.value}`, {
+      method: 'DELETE'
+    })
+    if (!res.ok) throw new Error('删除失败')
+
+    ElMessage.success('已彻底遗忘该记忆')
+    await fetchMemories()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('删除失败')
+  }
+}
+// ====== 记忆管理 ======
 </script>
 
 <style scoped>
@@ -703,18 +778,102 @@ async function handleSaveShortcut(msg, msgIndex) {
   color: #3555a8;
 }
 
+/* 默认在 PC 端隐藏汉堡按钮和遮罩层 */
+.mobile-menu-btn {
+  display: none;
+  padding: 4px 8px;
+  color: #3555a8;
+}
+.mobile-overlay {
+  display: none;
+}
+
+/* 手机/窄屏模式下的抽屉式布局 */
 @media (max-width: 1100px) {
   .chat-container {
-    flex-direction: column;
+    position: relative; /* 为绝对定位做参照 */
+    overflow: hidden;
+  }
+
+  .mobile-menu-btn {
+    display: inline-flex;
+  }
+
+  /* 遮罩层：默认透明不可点击，激活后变黑并阻挡底层操作 */
+  .mobile-overlay {
+    display: block;
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(18, 25, 43, 0.4);
+    backdrop-filter: blur(2px);
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+    border-radius: 30px;
+  }
+  .mobile-overlay.is-active {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* 侧边栏：默认被甩出屏幕左侧，激活后滑入 */
+  .chat-sidebar {
+    position: absolute;
+    top: 0; left: 0;
+    height: 100%;
+    width: 280px;
+    z-index: 101;
+    transform: translateX(-120%);
+    transition: transform 0.35s cubic-bezier(0.25, 1, 0.5, 1);
+    box-shadow: 10px 0 30px rgba(0, 0, 0, 0.1);
+  }
+  .chat-sidebar.show-mobile {
+    transform: translateX(0);
+  }
+
+  /* 聊天主界面：不再和侧边栏抢位置，直接霸占 100% 空间 */
+  .chat-main {
+    width: 100%;
     height: 100%;
   }
 
-  .chat-sidebar {
-    width: 100%;
+  .main-hero h2 {
+    font-size: 20px; /* 手机端标题稍微调小一点 */
   }
+}
 
-  .chat-main {
-    min-height: 0;
-  }
+/* 👇 记忆列表的样式 */
+.memory-drawer-content {
+  padding: 0 10px;
+}
+.memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.memory-item {
+  padding: 16px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(247, 250, 255, 0.98), rgba(255, 248, 251, 0.6));
+  border: 1px solid rgba(225, 231, 245, 0.9);
+  transition: all 0.25s ease;
+}
+.memory-item:hover {
+  box-shadow: 0 8px 24px rgba(84, 160, 255, 0.12);
+  transform: translateY(-2px);
+}
+.memory-content {
+  font-size: 14.5px;
+  color: #2c3e50;
+  line-height: 1.6;
+  margin-bottom: 14px;
+}
+.memory-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: #909399;
 }
 </style>

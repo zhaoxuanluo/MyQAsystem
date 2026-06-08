@@ -1,6 +1,8 @@
 """Chat API endpoint with SSE support for text and structured agent outputs."""
 
 import json
+import tiktoken
+import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -13,8 +15,20 @@ from app.models.knowledge_base import KnowledgeBase
 from app.models.conversation import Conversation, Message
 from app.core.generator import generate_answer
 
+from fastapi import BackgroundTasks
+from app.core.memory_manager import extract_and_store_memory_task
+
+
 router = APIRouter()
 
+def count_tokens(text: str) -> int:
+    """计算文本的 Token 数量"""
+    try:
+        encoding = tiktoken.get_encoding("cl100k_base")
+        return len(encoding.encode(text))
+    except Exception:
+        # 兜底粗略计算
+        return len(text) * 2
 
 class ChatRequest(BaseModel):
     query: str
@@ -28,6 +42,7 @@ class ChatRequest(BaseModel):
 @router.post("/chat")
 async def chat(
     req: ChatRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     """Send a question and get a RAG-powered answer."""
@@ -50,13 +65,21 @@ async def chat(
         select(Message)
         .where(Message.conversation_id == conversation.id)
         .order_by(Message.created_at.desc())
-        .limit(6)
+        .limit(20)
     )
-    history_msgs = list(reversed(history_result.scalars().all()))
+    recent_messages = history_result.scalars().all()
     conversation_history = []
-    for msg in history_msgs:
+    current_tokens = 0
+    max_history_tokens = 8192
+    for msg in recent_messages:
         text = msg.content.get("text", "") if isinstance(msg.content, dict) else str(msg.content)
-        conversation_history.append({"role": msg.role, "content": text})
+        msg_token_count = count_tokens(text)
+
+        if current_tokens + msg_token_count > max_history_tokens:
+            break
+
+        current_tokens += msg_token_count
+        conversation_history.insert(0, {"role": msg.role, "content": text})
 
     user_msg = Message(
         conversation_id=conversation.id,
@@ -100,6 +123,16 @@ async def chat(
     )
     db.add(assistant_msg)
     await db.commit()
+
+    if not req.stream:
+        # 悄悄把提取记忆的任务扔给后台，让用户不用等待记忆提取的过程，提升响应速度和用户体验
+        background_tasks.add_task(
+            extract_and_store_memory_task,
+            user_id=req.kb_id,
+            user_message=req.query,
+            ai_response=content.get("text", ""),
+            llm_config_id = req.llm_config_id
+        )
 
     return {
         "conversation_id": str(conversation.id),
@@ -178,6 +211,16 @@ async def _sse_stream(req, conversation_id, conversation_history):
             )
             db.add(assistant_msg)
             await db.commit()
+
+            # 在流式输出结束后，把收集到的完整对话扔给后台去提炼记忆
+            asyncio.create_task(
+                extract_and_store_memory_task(
+                    user_id=req.kb_id,
+                    user_message=req.query,
+                    ai_response=full_text,
+                    llm_config_id=req.llm_config_id
+                )
+            )
 
             done_data = {
                 "message_id": str(assistant_msg.id),

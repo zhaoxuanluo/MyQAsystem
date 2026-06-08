@@ -429,6 +429,125 @@ class VectorStore:
             self.client.drop_collection(collection_name)
             logger.info(f"Dropped collection {collection_name}")
 
+    # ================= 长期记忆 =================
+
+    def _memory_collection_name(self, user_id: str) -> str:
+        """生成记忆专属的集合名称（Milvus 集合名不支持连字符）"""
+        return f"memory_{user_id.replace('-', '_')}"
+
+    def create_memory_collection(self, user_id: str, dense_dim: int = 1024):
+        """为用户创建专属的记忆向量集合"""
+        self._init_client()
+        if self.client is None:
+            return
+
+        collection_name = self._memory_collection_name(user_id)
+
+        if self._use_memory:
+            self.client.create_collection(collection_name)
+            return
+
+        if self.client.has_collection(collection_name):
+            return
+
+        from pymilvus import DataType
+        schema = self.client.create_schema(auto_id=False, enable_dynamic_field=True)
+        # 注意：这里的 id 我们直接使用 SQLite 里生成的 memory_id，方便联动删除
+        schema.add_field(field_name="id", datatype=DataType.VARCHAR, max_length=64, is_primary=True)
+        schema.add_field(field_name="dense_vector", datatype=DataType.FLOAT_VECTOR, dim=dense_dim)
+        schema.add_field(field_name="content", datatype=DataType.VARCHAR, max_length=8192)
+
+        index_params = self.client.prepare_index_params()
+        index_params.add_index(field_name="dense_vector", index_type="FLAT", metric_type="COSINE")
+
+        self.client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
+        logger.info(f"Created memory collection: {collection_name}")
+
+    def insert_memory(self, user_id: str, memory_id: str, dense_vector: list, content: str):
+        """将提取到的长期记忆插入向量库"""
+        self._init_client()
+        if self.client is None:
+            return
+
+        # 确保集合存在
+        self.create_memory_collection(user_id)
+        collection_name = self._memory_collection_name(user_id)
+
+        # 清洗向量格式
+        raw_vec = dense_vector.tolist() if hasattr(dense_vector, 'tolist') else dense_vector
+        clean_vec = [float(x) for x in raw_vec]
+
+        data = [{
+            "id": memory_id,  # 强制与 SQLite 中的 ID 保持一致
+            "dense_vector": clean_vec,
+            "content": content[:8000]
+        }]
+
+        if self._use_memory:
+            # 兼容你的内存模式：补充缺失的字段以免报错
+            data[0]["chunk_id"] = memory_id
+            data[0]["doc_id"] = "memory"
+            self.client.insert(collection_name, [data[0]])
+        else:
+            self.client.insert(collection_name=collection_name, data=data)
+            logger.info(f"Inserted 1 memory into {collection_name}")
+
+    def search_memory(self, user_id: str, query_vector: list, top_k: int = 2) -> list[SearchResult]:
+        """检索长期记忆 (默认取 Top-2 黄金比例)"""
+        self._init_client()
+        if self.client is None:
+            return []
+
+        collection_name = self._memory_collection_name(user_id)
+
+        if self._use_memory:
+            if not self.client.has_collection(collection_name):
+                return []
+            dense_vec = query_vector.tolist() if hasattr(query_vector, 'tolist') else query_vector
+            results = self.client.search(collection_name, dense_vec, top_k)
+            return [SearchResult(chunk_id=r["id"], score=r["score"], content=r["content"]) for r in results]
+
+        if not self.client.has_collection(collection_name):
+            return []
+
+        self.client.load_collection(collection_name)
+
+        dense_vec = query_vector.tolist() if hasattr(query_vector, 'tolist') else query_vector
+        results = self.client.search(
+            collection_name=collection_name,
+            data=[dense_vec],
+            anns_field="dense_vector",
+            search_params={"metric_type": "COSINE"},
+            limit=top_k,
+            output_fields=["content"],
+        )
+
+        search_results = []
+        for hits in results:
+            for hit in hits:
+                entity = hit.get("entity", {})
+                search_results.append(SearchResult(
+                    chunk_id=hit.get("id", ""),  # 这里对应 memory_id
+                    score=hit.get("distance", 0.0),
+                    content=entity.get("content", ""),
+                ))
+
+        return search_results
+
+    def delete_memory(self, user_id: str, memory_id: str):
+        """用户手动触发：彻底物理抹除某条记忆的向量"""
+        self._init_client()
+        if self.client is None:
+            return
+
+        collection_name = self._memory_collection_name(user_id)
+
+        if self._use_memory:
+            # 兼容你的 InMemoryVectorStore 里的正则匹配过滤逻辑
+            self.client.delete(collection_name, f'id == "{memory_id}"')
+        elif self.client.has_collection(collection_name):
+            self.client.delete(collection_name=collection_name, filter=f'id == "{memory_id}"')
+            logger.info(f"Deleted memory vector {memory_id}")
 
 # Singleton
 vector_store = VectorStore()

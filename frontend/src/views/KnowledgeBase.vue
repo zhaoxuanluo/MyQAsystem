@@ -26,6 +26,7 @@
                   <el-dropdown-menu>
                     <el-dropdown-item @click="$router.push(`/knowledge/${kb.id}/documents`)">管理文档</el-dropdown-item>
                     <el-dropdown-item @click="$router.push({ path: '/chat', query: { kb_id: kb.id } })">开始问答</el-dropdown-item>
+                    <el-dropdown-item @click="openMemoryDrawer(kb.id)">专属记忆</el-dropdown-item>
                     <el-dropdown-item divided style="color: #f56c6c" @click="handleDelete(kb.id)">删除</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
@@ -46,6 +47,9 @@
             </el-button>
             <el-button size="small" type="primary" @click="$router.push({ path: '/chat', query: { kb_id: kb.id } })">
               <el-icon><ChatDotRound /></el-icon> 问答
+            </el-button>
+            <el-button size="small" type="warning" plain @click="openMemoryDrawer(kb.id)">
+              <el-icon><Cpu /></el-icon> 记忆
             </el-button>
           </div>
         </el-card>
@@ -148,12 +152,30 @@
         </div>
       </div>
     </el-dialog>
+    <el-drawer v-model="memoryDrawerVisible" title="记忆管理" size="420px">
+      <div v-loading="loadingMemories" class="memory-drawer-content">
+        <el-empty v-if="!loadingMemories && memories.length === 0" description="该知识库暂无记忆" />
+
+        <div v-else class="memory-list">
+          <div v-for="mem in memories" :key="mem.id" class="memory-item">
+            <div class="memory-content">{{ mem.content }}</div>
+            <div class="memory-footer">
+              <span class="memory-time">{{ new Date(mem.created_at).toLocaleString() }}</span>
+              <el-button size="small" type="danger" text @click="deleteMemory(mem.id)">
+                遗忘
+              </el-button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
 <script setup>
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Cpu } from '@element-plus/icons-vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 
 const store = useKnowledgeStore()
@@ -168,6 +190,58 @@ const createForm = ref({
   chunk_size: 512,
   chunk_overlap: 64,
 })
+
+// ====== 记忆管理 ======
+const memoryDrawerVisible = ref(false)
+const memories = ref([])
+const loadingMemories = ref(false)
+const currentMemoryKbId = ref('')
+
+// 打开抽屉并获取记忆
+async function openMemoryDrawer(kbId) {
+  currentMemoryKbId.value = kbId
+  memoryDrawerVisible.value = true
+  await fetchMemories()
+}
+
+// 调取后端 API 获取记忆列表
+async function fetchMemories() {
+  loadingMemories.value = true
+  try {
+    const res = await fetch(`/api/v1/memory?kb_id=${currentMemoryKbId.value}`)
+    if (!res.ok) throw new Error('获取失败')
+    const data = await res.json()
+    memories.value = data.items || []
+  } catch (e) {
+    ElMessage.error('获取记忆失败')
+  } finally {
+    loadingMemories.value = false
+  }
+}
+
+// 删除某条记忆
+async function deleteMemory(memoryId) {
+  try {
+    await ElMessageBox.confirm('确定要让大模型永久遗忘这条记忆吗？', '遗忘确认', {
+      confirmButtonText: '强制遗忘',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+
+    const res = await fetch(`/api/v1/memory/${memoryId}?kb_id=${currentMemoryKbId.value}`, {
+      method: 'DELETE'
+    })
+    if (!res.ok) throw new Error('删除失败')
+
+    ElMessage.success('已彻底遗忘该记忆')
+    await fetchMemories() // 刷新列表
+  } catch (e) {
+    if (e !== 'cancel') {
+      ElMessage.error('删除失败')
+    }
+  }
+}
+// ====== 记忆管理 ======
 
 onMounted(() => store.fetchList())
 
@@ -342,4 +416,40 @@ async function handleDelete(id) {
 .help-item strong {
   color: #2f3b58;
 }
+
+/* 记忆列表样式 */
+.memory-drawer-content {
+  padding: 0 10px;
+}
+.memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.memory-item {
+  padding: 16px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(247, 250, 255, 0.98), rgba(255, 248, 251, 0.6));
+  border: 1px solid rgba(225, 231, 245, 0.9);
+  transition: all 0.25s ease;
+}
+.memory-item:hover {
+  box-shadow: 0 8px 24px rgba(84, 160, 255, 0.12);
+  transform: translateY(-2px);
+}
+.memory-content {
+  font-size: 14.5px;
+  color: #2c3e50;
+  line-height: 1.6;
+  margin-bottom: 14px;
+}
+.memory-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: #909399;
+}
+/* 样式结束 */
+
 </style>
